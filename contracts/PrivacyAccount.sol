@@ -35,6 +35,7 @@ contract Account is IAccount {
     uint256 public count;
     address public owner;
     address public verifier;
+    bytes32[] public supportedVerificationKey;
 
     // Events
     event Deposit(
@@ -52,10 +53,16 @@ contract Account is IAccount {
     error TransferFailed();
     error NullifierAlreadyUsed();
     error InvalidRoot();
+    error UnsupportedVerificationKey();
 
-    constructor(address _owner, address _verifier) {
+    constructor(
+        address _owner,
+        address _verifier,
+        bytes32[] memory _supportedVK
+    ) {
         owner = _owner;
         verifier = _verifier;
+        supportedVerificationKey = _supportedVK;
         tree.initialize();
     }
 
@@ -69,6 +76,12 @@ contract Account is IAccount {
             userOp.signature,
             (bytes, bytes32[])
         );
+
+        // Check if VK is supported
+        if (!_isVerificationKeySupported(publicInputs)) {
+            return 1; // Invalid VK
+        }
+
         if (honkVerifier.verify(proof, publicInputs)) {
             return 0;
         } else {
@@ -102,59 +115,95 @@ contract Account is IAccount {
         emit Deposit(secretNullifierHash, amount, token);
     }
 
-    // function withdraw(
-    //     bytes calldata proof,
-    //     uint256[] calldata publicInputs,
-    // ) external {
-    //     // Parse public inputs (simplified - skip proof verification for now)
-    //     uint256 root_1 = publicInputs[0];
-    //     uint256 nullifier_1 = publicInputs[1];
-    //     address token_address_1 = address(uint160(publicInputs[2]));
-    //     uint256 amount = publicInputs[3];
-    //     uint256 root_2 = publicInputs[4];
-    //     uint256 nullifier_2 = publicInputs[5];
-    //     uint256 refund_commitment_hash = publicInputs[8];
-    //     uint256 refund_commitment_hash_fee = publicInputs[9];
+    function withdraw(
+        bytes calldata proof,
+        bytes32[] calldata publicInputs
+    ) external {
+        if (!_isVerificationKeySupported(publicInputs)) {
+            revert UnsupportedVerificationKey();
+        }
 
-    //     // Check if nullifiers already used
-    //     if (nullifierHashes[nullifier_1]) {
-    //         revert NullifierAlreadyUsed();
-    //     }
-    //     if (nullifierHashes[nullifier_2]) {
-    //         revert NullifierAlreadyUsed();
-    //     }
+        IVerifier honkVerifier = IVerifier(verifier);
+        if (!honkVerifier.verify(proof, publicInputs)) {
+            revert("Invalid proof");
+        }
+        uint256 root_1 = uint256(publicInputs[0]);
+        uint256 nullifier_1 = uint256(publicInputs[1]);
+        address token_address_1 = address(uint160(uint256(publicInputs[2])));
+        uint256 amount = uint256(publicInputs[3]);
+        uint256 root_2 = uint256(publicInputs[4]);
+        uint256 nullifier_2 = uint256(publicInputs[5]);
+        // unused for now
+        address token_address_2 = address(uint160(uint256(publicInputs[6])));
+        uint256 gas_fee = uint256(publicInputs[7]);
+        uint256 refund_commitment_hash = uint256(publicInputs[8]);
+        uint256 refund_commitment_hash_fee = uint256(publicInputs[9]);
+        address recipient = address(uint160(uint256(publicInputs[10])));
 
-    //     // Check if merkle roots are valid
-    //     if (!tree.isValidRoot(root_1)) {
-    //         revert InvalidRoot();
-    //     }
-    //     if (!tree.isValidRoot(root_2)) {
-    //         revert InvalidRoot();
-    //     }
+        // Check if VK is supported
+        if (!_isVerificationKeySupported(publicInputs)) {
+            revert UnsupportedVerificationKey();
+        }
 
-    //     // Mark nullifiers as used
-    //     nullifierHashes[nullifier_1] = true;
-    //     nullifierHashes[nullifier_2] = true;
+        // Check if nullifiers already used
+        if (nullifierHashes[nullifier_1]) {
+            revert NullifierAlreadyUsed();
+        }
+        if (nullifierHashes[nullifier_2]) {
+            revert NullifierAlreadyUsed();
+        }
 
-    //     // Add refund commitments to tree
-    //     tree.addLeaf(refund_commitment_hash);
-    //     tree.addLeaf(refund_commitment_hash_fee);
+        // Check if merkle roots are valid
+        if (!tree.isValidRoot(root_1)) {
+            revert InvalidRoot();
+        }
+        if (!tree.isValidRoot(root_2)) {
+            revert InvalidRoot();
+        }
 
-    //     // Transfer tokens to recipient
-    //     IERC20 erc20_1 = IERC20(token_address_1);
-    //     bool success = erc20_1.transfer(recipient, amount);
-    //     if (!success) revert TransferFailed();
+        // Mark nullifiers as used
+        nullifierHashes[nullifier_1] = true;
+        nullifierHashes[nullifier_2] = true;
 
-    //     emit Withdrawal(nullifier_1, nullifier_2, recipient);
-    // }
+        // Add refund commitments to tree
+        tree.addLeaf(refund_commitment_hash);
+        tree.addLeaf(refund_commitment_hash_fee);
 
-    // Helper function for Poseidon hash
+        // Transfer tokens to recipient
+        IERC20 erc20_1 = IERC20(token_address_1);
+        bool success = erc20_1.transfer(recipient, amount);
+        if (!success) revert TransferFailed();
+    }
+
     function _poseidonHash(
         uint256 a,
         uint256 b
     ) internal pure returns (uint256) {
         uint256[2] memory inputs = [a, b];
         return PoseidonT3.hash(inputs);
+    }
+
+    function _isVerificationKeySupported(
+        bytes32[] memory publicInputs
+    ) internal view returns (bool) {
+        uint256 VK_SIZE = 112;
+
+        bytes32[] memory extractedVK = new bytes32[](VK_SIZE);
+        for (uint256 i = 0; i < VK_SIZE; i++) {
+            extractedVK[i] = publicInputs[11 + i];
+        }
+
+        if (supportedVerificationKey.length != VK_SIZE) {
+            return false;
+        }
+
+        for (uint256 i = 0; i < VK_SIZE; i++) {
+            if (supportedVerificationKey[i] != extractedVK[i]) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     // Getter functions
@@ -170,26 +219,29 @@ contract Account is IAccount {
         bytes calldata proof,
         bytes32[] calldata publicInputs
     ) external {
+        if (!_isVerificationKeySupported(publicInputs)) {
+            revert UnsupportedVerificationKey();
+        }
+
         IVerifier honkVerifier = IVerifier(verifier);
         if (!honkVerifier.verify(proof, publicInputs)) {
             revert("Invalid proof");
         }
         count++;
     }
-
-    // function execute(address target, uint256 value, bytes calldata data) external {
-    //     (bool success, ) = target.call{value: value}(data);
-    //     require(success, "Execution failed");
-    // }
 }
 
 contract AccountFactory {
-    function createAccount(address owner) external returns (address) {
+    function createAccount(
+        address owner,
+        address verifier,
+        bytes32[] memory supportedVK
+    ) external returns (address) {
         bytes32 salt = bytes32(uint256(uint160(owner)));
         bytes memory creationCode = type(Account).creationCode;
         bytes memory bytecode = abi.encodePacked(
             creationCode,
-            abi.encode(owner)
+            abi.encode(owner, verifier, supportedVK)
         );
 
         address addr = Create2.computeAddress(salt, keccak256(bytecode));
