@@ -1,7 +1,7 @@
 const hre = require("hardhat");
 
-const PA_ADDRESS = "0x809d550fca64d94Bd9F66E60752A544199cfAC3D";
-const TOKEN_ADDRESS = "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853";
+const PA_ADDRESS = "0xAA292E8611aDF267e563f334Ee42320aC96D0463";
+const TOKEN_ADDRESS = "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512";
 
 async function main() {
     const [deployer] = await hre.ethers.getSigners();
@@ -16,16 +16,6 @@ async function main() {
     const counter = await privacyAccount.count();
     console.log("Current counter:", counter.toString());
 
-    // address token
-
-    // try {
-    //     const txApprove = await testToken.approve(PA_ADDRESS, amount);
-    //     await txApprove.wait();
-    //     console.log("Approved token transfer for Privacy Account");
-
-    // } catch (error) {
-    //     console.error("Deposit failed:", error);
-    // }
 }
 
 main().catch((error) => {
