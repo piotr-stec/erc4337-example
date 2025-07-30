@@ -5,7 +5,7 @@
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│    User Wallet  │    │   Privacy Pool   │    │   EntryPoint    │
+│    User/Relayer │    │   Privacy Pool   │    │   EntryPoint    │
 │                 │    │  Contract (AA)   │    │                 │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
          │                       │                       │
@@ -13,9 +13,11 @@
          │ 1. Direct deposit()   │                       │
          │─────────────────────▶│                       │
          │                       │                       │
-         │                       │ 2. UserOperation      │
-         │                       │   with ZK proof       │
-         │                       │─────────────────────▶│
+         │                       │                       │
+         │ 2. UserOperation      │                       │
+         │   (sender=PrivacyPool,│                       │
+         │    signature=ZK proof)│                       │
+         │─────────────────────────────────────────────▶│
          │                       │                       │
          │                       │ 3. validateUserOp()   │
          │                       │◀─────────────────────│
@@ -36,19 +38,24 @@
 
 ### Phase 2: Withdrawal (Anonymous via ERC-4337)
 1. **Owner** calls `depositTo(PrivacyPool)` on EntryPoint to fund gas fees
-2. **Privacy Pool Contract** (as AA Account) creates UserOperation with:
-   - `sender`: Privacy Pool contract address
-   - `callData`: encoded `execute()` function call on itself
+2. **User/Relayer** constructs UserOperation with:
+   - `sender`: Privacy Pool contract address (not user's wallet!)
+   - `callData`: encoded `withdraw()` function call 
    - `signature`: ZK proof + public inputs (encoded)
-3. **EntryPoint** validates UserOperation:
+3. **User/Relayer** calls `handleOps([userOp])` on EntryPoint
+4. **EntryPoint** validates UserOperation:
    - Calls `validateUserOp()` on Privacy Pool
    - Verifies ZK proof and verification key
-4. **EntryPoint** executes UserOperation:
+5. **EntryPoint** executes UserOperation:
    - Calls `withdraw()` on Privacy Pool
    - Re-verifies proof for security
-   - Increments counter (example operation)
+   - Transfers tokens to recipient
 
-**Key Point**: The Privacy Pool contract acts as both the ERC-4337 Account and the target contract. It validates and executes operations on itself, enabling anonymous interactions without revealing the original user's wallet.
+**Key Points**: 
+- The **User/Relayer** sends the transaction to EntryPoint, but `sender` field points to Privacy Pool
+- Privacy Pool acts as both ERC-4337 Account and target contract
+- ZK proof in signature proves user's right to withdraw without revealing identity
+- Original user's wallet is never directly involved in withdrawal transaction
 
 
 ## Setup
