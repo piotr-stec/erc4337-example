@@ -48,6 +48,7 @@ async function main() {
   const privacyPool = await PrivacyPool.deploy(
     owner,
     verifier,
+    hre.ethers.ZeroAddress, // proper zero address
     supportedVerificationKey
   );
   await privacyPool.waitForDeployment();
