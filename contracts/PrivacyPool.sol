@@ -122,7 +122,10 @@ contract PrivacyPool {
         uint256 indexed secretHash,
         string offerType,
         uint256 cryptoAmount,
-        uint256 fiatAmount
+        uint256 fiatAmount,
+        string currency,
+        address tokenAddress,
+        string revTag
     );
 
     event OfferCanceled(
@@ -391,7 +394,10 @@ contract PrivacyPool {
             secretHash,
             offerType,
             cryptoAmount,
-            fiatAmount
+            fiatAmount,
+            currency,
+            tokenAddress,
+            revTag
         );
     }
 
