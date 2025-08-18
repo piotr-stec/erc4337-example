@@ -100,9 +100,8 @@ contract PrivacyPool {
     uint256 public count;
     address public owner;
     address public verifier;
-    address public tlsnVerifier;
-
-    bytes32[] public supportedVerificationKey;
+    address public tlsnTransactionVerifier;
+    address public tlsnBinanceVerifier;
 
     // Events
     event Deposit(
@@ -174,13 +173,13 @@ contract PrivacyPool {
     constructor(
         address _owner,
         address _verifier,
-        address _tlsnVerifier,
-        bytes32[] memory _supportedVK
+        address _tlsnTransactionVerifier,
+        address _tlsnBinanceVerifier
     ) {
         owner = _owner;
         verifier = _verifier;
-        tlsnVerifier = _tlsnVerifier;
-        supportedVerificationKey = _supportedVK;
+        tlsnTransactionVerifier = _tlsnTransactionVerifier;
+        tlsnBinanceVerifier = _tlsnBinanceVerifier;
         tree.initialize();
     }
 
@@ -214,10 +213,6 @@ contract PrivacyPool {
         bytes calldata proof,
         bytes32[] calldata publicInputs
     ) external {
-        if (!_isVerificationKeySupported(publicInputs)) {
-            revert UnsupportedVerificationKey();
-        }
-
         IVerifier honkVerifier = IVerifier(verifier);
         if (!honkVerifier.verify(proof, publicInputs)) {
             revert("Invalid proof");
@@ -234,11 +229,6 @@ contract PrivacyPool {
         uint256 refund_commitment_hash = uint256(publicInputs[8]);
         uint256 refund_commitment_hash_fee = uint256(publicInputs[9]);
         address recipient = address(uint160(uint256(publicInputs[10])));
-
-        // Check if VK is supported
-        if (!_isVerificationKeySupported(publicInputs)) {
-            revert UnsupportedVerificationKey();
-        }
 
         // Check if nullifiers already used
         if (nullifierHashes[nullifier_1]) {
@@ -276,12 +266,6 @@ contract PrivacyPool {
         uint256 secretHash,
         OfferParams calldata params
     ) external {
-        // Validate deposit
-        // Check if VK is supported
-        if (!_isVerificationKeySupported(publicInputs)) {
-            revert UnsupportedVerificationKey();
-        }
-
         // Verify proof
         if (!IVerifier(verifier).verify(proof, publicInputs)) {
             revert("Invalid proof");
@@ -610,30 +594,28 @@ contract PrivacyPool {
     }
 
     function verifyTransaction(
-        bytes calldata proof,
-        bytes32[] calldata publicInputs,
+        bytes calldata proofTransaction,
+        bytes32[] calldata publicInputsTransaction,
+        bytes calldata proofPrice,
+        bytes32[] calldata publicInputsPrice,
         bytes32 transactionId,
         uint256 secretNullifierHash
     ) external {
-        // Check if VK is supported
-        if (!_isVerificationKeySupported(publicInputs)) {
-            revert UnsupportedVerificationKey();
-        }
+        // // Verify proof
+        // IVerifier honkVerifier = IVerifier(tlsnTransactionVerifier);
+        // if (!honkVerifier.verify(proofTransaction, publicInputsTransaction)) {
+        //     revert("Invalid proof");
+        // }
 
         // Verify proof
-        IVerifier honkVerifier = IVerifier(tlsnVerifier);
-        if (!honkVerifier.verify(proof, publicInputs)) {
+        IVerifier honkBinanceVerifier = IVerifier(tlsnBinanceVerifier);
+        if (!honkBinanceVerifier.verify(proofPrice, publicInputsPrice)) {
             revert("Invalid proof");
         }
 
-        // Validate nullifier hash
-        if (nullifierHashes[secretNullifierHash]) {
-            revert NullifierAlreadyUsed();
-        }
-
         // Validate transaction exists
-        Transaction storage transaction = transactions[transactionId];
-        require(transaction.timestamp != 0, "Transaction not found");
+        // Transaction storage transaction = transactions[transactionId];
+        // require(transaction.timestamp != 0, "Transaction not found");
 
         // TODO: proof checks
 
@@ -650,14 +632,14 @@ contract PrivacyPool {
         // tree.addLeaf(commitment);
 
         // Update transaction status to success
-        transaction.status = "success";
+        // transaction.status = "success";
 
-        emit TransactionResponse(
-            transactionId,
-            transaction.fiatAmount,
-            transaction.currency,
-            transaction.randomTitle
-        );
+        // emit TransactionResponse(
+        //     transactionId,
+        //     transaction.fiatAmount,
+        //     transaction.currency,
+        //     transaction.randomTitle
+        // );
     }
 
     function _poseidonHash(
@@ -666,29 +648,6 @@ contract PrivacyPool {
     ) internal pure returns (uint256) {
         uint256[2] memory inputs = [a, b];
         return PoseidonT3.hash(inputs);
-    }
-
-    function _isVerificationKeySupported(
-        bytes32[] memory publicInputs
-    ) internal view returns (bool) {
-        uint256 VK_SIZE = 112;
-
-        bytes32[] memory extractedVK = new bytes32[](VK_SIZE);
-        for (uint256 i = 0; i < VK_SIZE; i++) {
-            extractedVK[i] = publicInputs[11 + i];
-        }
-
-        if (supportedVerificationKey.length != VK_SIZE) {
-            return false;
-        }
-
-        for (uint256 i = 0; i < VK_SIZE; i++) {
-            if (supportedVerificationKey[i] != extractedVK[i]) {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     // Getter functions
@@ -704,10 +663,6 @@ contract PrivacyPool {
         bytes calldata proof,
         bytes32[] calldata publicInputs
     ) external {
-        if (!_isVerificationKeySupported(publicInputs)) {
-            revert UnsupportedVerificationKey();
-        }
-
         IVerifier honkVerifier = IVerifier(verifier);
         if (!honkVerifier.verify(proof, publicInputs)) {
             revert("Invalid proof");
@@ -736,5 +691,178 @@ contract PrivacyPool {
             _i /= 10;
         }
         return string(bstr);
+    }
+
+    // Test function to extract and return price and symbol data
+    function testExtractPriceData(
+        bytes calldata proofPrice,
+        bytes32[] calldata publicInputsPrice
+    ) external view returns (string memory price, string memory symbol, uint64 mins, uint256 closeTime) {
+        // Verify proof first
+        IVerifier honkBinanceVerifier = IVerifier(tlsnBinanceVerifier);
+        require(honkBinanceVerifier.verify(proofPrice, publicInputsPrice), "Invalid proof");
+        
+        // Extract data
+        price = extractPrice(publicInputsPrice);
+        symbol = extractSymbol(publicInputsPrice);
+        mins = extractMins(publicInputsPrice);
+        closeTime = extractCloseTime(publicInputsPrice);
+    }
+
+    // Test function WITHOUT proof verification for debugging
+    function testExtractPriceDataNoVerify(
+        bytes32[] calldata publicInputsPrice
+    ) external pure returns (string memory price, string memory symbol, uint64 mins, uint256 closeTime) {
+        // Extract data without proof verification
+        price = extractPrice(publicInputsPrice);
+        symbol = extractSymbol(publicInputsPrice);
+        mins = extractMins(publicInputsPrice);
+        closeTime = extractCloseTime(publicInputsPrice);
+    }
+
+    // Test function with clean data extraction
+    function testExtractCleanPriceData(
+        bytes32[] calldata publicInputsPrice
+    ) external pure returns (uint256 cleanPrice, string memory cleanSymbol, uint64 mins, uint256 closeTime) {
+        // Extract clean data
+        cleanPrice = extractCleanPrice(publicInputsPrice);
+        cleanSymbol = extractCleanSymbol(publicInputsPrice);
+        mins = extractMins(publicInputsPrice);
+        closeTime = extractCloseTime(publicInputsPrice);
+    }
+
+    // Debug function to see raw bytes
+    function debugRawBytes(
+        bytes32[] calldata publicInputs, 
+        uint256 startIndex, 
+        uint256 length
+    ) external pure returns (bytes memory) {
+        bytes memory rawData = new bytes(length);
+        for (uint256 i = 0; i < length; i++) {
+            rawData[i] = bytes1(uint8(uint256(publicInputs[startIndex + i])));
+        }
+        return rawData;
+    }
+
+    function extractPrice(bytes32[] calldata publicInputs) internal pure returns (string memory) {
+        bytes memory priceData = new bytes(20);
+        
+        // Price.data starts at index 70 (corrected calculation)
+        for (uint256 i = 0; i < 20; i++) {
+            priceData[i] = bytes1(uint8(uint256(publicInputs[70 + i])));
+        }
+        
+        return string(priceData);
+    }
+
+    function extractSymbol(bytes32[] calldata publicInputs) internal pure returns (string memory) {
+        bytes memory symbolData = new bytes(14);
+        
+        // Symbol.data starts at index 108 (corrected calculation)
+        for (uint256 i = 0; i < 14; i++) {
+            symbolData[i] = bytes1(uint8(uint256(publicInputs[108 + i])));
+        }
+        
+        return string(symbolData);
+    }
+
+    // Extract clean price value from JSON format like "price":"3.62596667"
+    function extractCleanPrice(bytes32[] calldata publicInputs) internal pure returns (uint256) {
+        // Extract raw price data
+        bytes memory priceData = new bytes(20);
+        for (uint256 i = 0; i < 20; i++) {
+            priceData[i] = bytes1(uint8(uint256(publicInputs[70 + i])));
+        }
+        
+        // Find the numeric value between the quotes after ":"
+        // Format: "price":"3.62596667"
+        // We want to extract "3.62596667" and convert to uint256 with 8 decimal places
+        
+        uint256 start = 0;
+        uint256 end = 0;
+        bool foundColon = false;
+        bool foundSecondQuote = false;
+        
+        for (uint256 i = 0; i < 20; i++) {
+            if (priceData[i] == 0x3A) { // ':'
+                foundColon = true;
+            } else if (foundColon && priceData[i] == 0x22) { // '"' after colon
+                if (!foundSecondQuote) {
+                    start = i + 1; // Start after the quote
+                    foundSecondQuote = true;
+                } else {
+                    end = i; // End at the closing quote
+                    break;
+                }
+            }
+        }
+        
+        // Parse the decimal number
+        uint256 result = 0;
+        uint256 decimals = 0;
+        bool hasDecimal = false;
+        
+        for (uint256 i = start; i < end; i++) {
+            uint8 digit = uint8(priceData[i]);
+            if (digit == 0x2E) { // '.'
+                hasDecimal = true;
+            } else if (digit >= 0x30 && digit <= 0x39) { // '0'-'9'
+                result = result * 10 + (digit - 0x30);
+                if (hasDecimal) {
+                    decimals++;
+                }
+            }
+        }
+        
+        // Normalize to 8 decimal places
+        while (decimals < 8) {
+            result *= 10;
+            decimals++;
+        }
+        
+        return result;
+    }
+
+    // Extract clean symbol from format like "symbol=USDTPLN"
+    function extractCleanSymbol(bytes32[] calldata publicInputs) internal pure returns (string memory) {
+        bytes memory symbolData = new bytes(14);
+        for (uint256 i = 0; i < 14; i++) {
+            symbolData[i] = bytes1(uint8(uint256(publicInputs[108 + i])));
+        }
+        
+        // Find the symbol after '='
+        uint256 start = 0;
+        for (uint256 i = 0; i < 14; i++) {
+            if (symbolData[i] == 0x3D) { // '='
+                start = i + 1;
+                break;
+            }
+        }
+        
+        // Extract symbol part
+        bytes memory cleanSymbol = new bytes(14 - start);
+        for (uint256 i = 0; i < 14 - start; i++) {
+            cleanSymbol[i] = symbolData[start + i];
+        }
+        
+        return string(cleanSymbol);
+    }
+
+    function extractMins(bytes32[] calldata publicInputs) internal pure returns (uint64) {
+        // Mins.data starts at index 1, 8 bytes
+        uint64 mins = 0;
+        for (uint256 i = 0; i < 8; i++) {
+            mins |= uint64(uint8(uint256(publicInputs[1 + i]))) << uint64(8 * (7 - i));
+        }
+        return mins;
+    }
+
+    function extractCloseTime(bytes32[] calldata publicInputs) internal pure returns (uint256) {
+        // CloseTime.data starts at index 27, 25 bytes
+        uint256 closeTime = 0;
+        for (uint256 i = 0; i < 25; i++) {
+            closeTime |= uint256(uint8(uint256(publicInputs[27 + i]))) << (8 * (24 - i));
+        }
+        return closeTime;
     }
 }

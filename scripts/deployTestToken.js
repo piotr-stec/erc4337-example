@@ -91,9 +91,9 @@ async function main() {
 main()
   .then((address) => {
     console.log("\nTest Token deployed at:", address);
-    process.exit(0);
+    setTimeout(() => process.exit(0), 100);
   })
   .catch((error) => {
     console.error(error);
-    process.exitCode = 1;
+    setTimeout(() => process.exit(1), 100);
   });
